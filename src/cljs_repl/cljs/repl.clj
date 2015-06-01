@@ -5,10 +5,6 @@
             [clojure.tools.reader.reader-types :as readers])
   (:import [java.io PipedInputStream PipedInputStream OutputStream PrintWriter]))
 
-(defn start-repl
-  [{:keys [reader print print-no-newline prompt quit-prompt flush]}]
-  )
-
 (defn tear-down
   [{:keys [input output]}]
   (doseq [item (concat (vals input) (vals output))]
