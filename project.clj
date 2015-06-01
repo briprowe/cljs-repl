@@ -6,6 +6,7 @@
   :dependencies [[org.clojure/clojure "1.7.0-RC1"]
                  [org.clojure/clojurescript "0.0-3269"]
                  [org.clojure/tools.nrepl "0.2.10"]
+                 [org.clojure/tools.reader "0.9.2"]
                  [com.stuartsierra/component "0.2.3"]]
 
   :profiles
