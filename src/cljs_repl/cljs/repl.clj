@@ -7,24 +7,17 @@
 
 (defn start-repl
   [{:keys [reader print print-no-newline prompt quit-prompt flush]}]
-  (future
-    (repl/repl (rhino/repl-env)
-               :reader reader
-               :print print
-               :prompt prompt
-               :flush flush
-               :quit-prompt quit-prompt
-               :print-no-newline print-no-newline)))
+  )
 
 (defn tear-down
-  [{:keys [input output output-writer]}]
-  (doseq [item (into [output-writer] (concat (vals input) (vals output)))]
+  [{:keys [input output]}]
+  (doseq [item (concat (vals input) (vals output))]
     (.close item)))
 
 (defn write-repl
   [repl msg]
   (doto (get-in repl [:input :writer])
-    (.print msg)
+    (.println msg)
     (.flush)))
 
 (defn ->piped-pair
@@ -47,29 +40,29 @@
     (let [input (->piped-pair buffer-size)
           output (->piped-pair buffer-size)
           output-writer (java.io.PrintWriter. (:write output) true)
+          input-writer (java.io.PrintWriter. (:write input) true)
           reader (repl-reader (:read input))
           writern (fn [args] (.println output-writer args))
-          writer (fn [args] (.print output-writer args))
-          repl (start-repl {:reader reader
-                            :print writern
-                            :prompt #(binding [*out* output-writer]
-                                       (repl/repl-prompt))
-                            :quit-prompt #(binding [*out* output-writer]
-                                            (repl/repl-quit-prompt))
-                            :flush #(.flush output-writer)
-                            :print-no-newline writer})]
+          writer (fn [args] (.print output-writer args))]
       (assoc this
-             :input (assoc input :writer (java.io.PrintWriter. (:write input) true))
-             :output output
-             :output-writer output-writer
-             :reader reader
-             :writern writern
-             :writer writer
-             :repl repl)))
+             :input (assoc input :writer input-writer)
+             :output (assoc output :writer output-writer)
+             :cljs-reader reader
+             :repl
+             (future
+               (repl/repl (rhino/repl-env)
+                          :reader reader
+                          :print writern
+                          :prompt #(binding [*out* output-writer]
+                                     (repl/repl-prompt))
+                          :quit-prompt #(binding [*out* output-writer]
+                                            (repl/repl-quit-prompt))
+                          :flush #(.flush output-writer)
+                          :print-no-newline  writer)))))
 
   (stop [this]
-    (write-repl this ":cljs/quit\n")
-    (println "repl output:" @(:repl this))
+    (write-repl this ":cljs/quit")
+    @(:repl this)
     (tear-down this)
     (reduce #(assoc %1 %2 nil)
             this
@@ -85,11 +78,10 @@
     (def repl (component/start (->CLJSRepl)))
     (def repl-output (future (slurp (get-in repl [:output :read])))))
 
-  (write-repl repl "(+ 1 1)\n")
+  (write-repl repl "(+ 1 1)")
   (write-repl repl "(enable-console-print!)")
   (write-repl repl "(println \"hi!\")")
 
-  (.close (get-in repl [:output :read]))
   (component/stop repl)
   @repl-output
   
