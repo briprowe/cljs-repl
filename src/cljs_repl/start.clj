@@ -1,10 +1,4 @@
 (ns cljs-repl.start
-  (:require [clojure.tools.nrepl :as nrepl]))
+  (:require [com.stuartsierra.component :as component]
+            [cljs-repl.system :as system]))
 
-(defn start
-  [system-map]
-  :done)
-
-(defn stop
-  [system-map]
-  :done)

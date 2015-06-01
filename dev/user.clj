@@ -1,4 +1,5 @@
 (ns user
+  (:use [clojure.repl])
   (:require [clojure.tools.namespace.repl :refer [refresh]]))
 
 (defn go
