@@ -7,7 +7,7 @@
 
 (defn tear-down
   [{:keys [input output]}]
-  (doseq [item (concat (vals input) (vals output))]
+  (doseq [item (into (vec (vals input)) (vals output))]
     (.close item)))
 
 (defn write-repl
