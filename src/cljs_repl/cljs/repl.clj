@@ -3,83 +3,87 @@
             [cljs.repl.rhino :as rhino]
             [cljs.repl :as repl]
             [clojure.tools.reader.reader-types :as readers])
-  (:import [java.io PipedInputStream PipedInputStream OutputStream PrintWriter]))
-
-(defn tear-down
-  [{:keys [input output]}]
-  (doseq [item (into (vec (vals input)) (vals output))]
-    (.close item)))
+  (:import [java.util.concurrent ArrayBlockingQueue SynchronousQueue]))
 
 (defn write-repl
-  [repl msg]
-  (doto (get-in repl [:input :writer])
-    (.println msg)
-    (.flush)))
-
-(defn ->piped-pair
-  [buffer-size]
-  (let [is (java.io.PipedInputStream. buffer-size)]
-    {:read is
-     :write (java.io.PipedOutputStream. is)}))
+  [repl code]
+  (let [result (promise)]
+    (.put (:eval-queue repl) [code result])
+    result))
 
 (defn repl-reader
-  [input-stream]
+  [eval-queue result-queue]
   (fn []
-    (readers/source-logging-push-back-reader
-     (readers/input-stream-push-back-reader input-stream)
-     1 "NO_SOURCE_FILE")))
+    (let [[code return] (.take eval-queue)]
+      (.put result-queue return)
+      (readers/source-logging-push-back-reader
+       (readers/string-push-back-reader code)
+       1 "NO_SOURCE_FILE"))))
 
 (defrecord CLJSRepl
-    []
+    [eval-queue return-queue]
   component/Lifecycle
   (start [{:keys [buffer-size] :as this}]
-    (let [input (->piped-pair buffer-size)
-          output (->piped-pair buffer-size)
-          output-writer (java.io.PrintWriter. (:write output) true)
-          input-writer (java.io.PrintWriter. (:write input) true)
-          reader (repl-reader (:read input))
-          writern (fn [args] (.println output-writer args))
-          writer (fn [args] (.print output-writer args))]
+    (let [reader (repl-reader eval-queue return-queue)
+          error (fn [throwable js-env opts]
+                  (let [p (.take return-queue)]
+                    (deliver p throwable)))
+          print (fn [arg] (let [p (.take return-queue)]
+                           (deliver p arg)))]
       (assoc this
-             :input (assoc input :writer input-writer)
-             :output (assoc output :writer output-writer)
-             :cljs-reader reader
              :repl
              (future
                (repl/repl (rhino/repl-env)
                           :reader reader
-                          :print writern
-                          :prompt #(binding [*out* output-writer]
-                                     (repl/repl-prompt))
-                          :quit-prompt #(binding [*out* output-writer]
-                                            (repl/repl-quit-prompt))
-                          :flush #(.flush output-writer)
-                          :print-no-newline  writer)))))
+                          :print print
+                          :print-no-newline print
+                          :caught error
+                          :prompt (constantly :no-op)
+                          :quit-prompt (constantly :no-op)
+                          :flush (constantly :no-op))))))
 
   (stop [this]
-    (write-repl this ":cljs/quit")
-    @(:repl this)
-    (tear-down this)
-    (reduce #(assoc %1 %2 nil)
-            this
-            (keys this))))
+    (when-not (realized? (:repl this))
+      ;; Tell the cljs repl to stop.
+
+      ;; The returned promise should nvr be written to, because the
+      ;; repl will terminate after reading rather than continuing on
+      ;; to evaluation.
+      (write-repl this ":cljs/quit")
+
+      ;; wait for the repl thread to terminate
+      @(:repl this))
+
+    (assoc this
+           :eval-queue nil
+           :return-queue nil)))
 
 (defn ->CLJSRepl
-  ([] (->CLJSRepl (* 10 1024)))
-  ([buffer-size]
-   (map->CLJSRepl {:buffer-size buffer-size})))
+  ([] (->CLJSRepl 1024))
+  ([queue-size]
+   (map->CLJSRepl {:eval-queue (SynchronousQueue.)
+                   :return-queue (ArrayBlockingQueue. queue-size)})))
 
 (comment
-  (do
-    (def repl (component/start (->CLJSRepl)))
-    (def repl-output (future (slurp (get-in repl [:output :read])))))
+  (def repl (component/start (->CLJSRepl)))
 
-  (write-repl repl "(+ 1 1)")
-  (write-repl repl "(enable-console-print!)")
-  (write-repl repl "(println \"hi!\")")
+  @(write-repl repl "(+ 1 1)")
+  @(write-repl repl "(load-file \"./test/test_files/test.cljs\")")
+  (let [result @(write-repl repl "(test/test-fn 3)")]
+    (if (instance? Throwable result)
+      (.getMessage result)
+      result))
+  (let [result @(write-repl repl "(test/boo-fn 3)")]
+    (if (instance? Throwable result)
+      (.getMessage result)
+      result))
+  @(write-repl repl "(enable-console-print!)")
+  (let [result @(write-repl repl "(println \"hi!\")")]
+    (if (instance? Throwable result)
+      (.getMessage result)
+      result))
 
   (component/stop repl)
-  @repl-output
   
   
   )
